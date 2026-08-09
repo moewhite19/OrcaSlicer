@@ -250,7 +250,7 @@ static string get_diameter_string(float diameter)
     std::string s = stream.str();
     if (s.find('.') != std::string::npos) {   // Remove trailing zeros, but keep at least one decimal if needed
         s.erase(s.find_last_not_of('0') + 1);
-        if (s.back() == '.') s += '0';        // Ensure "1." → "1.0"
+        if (s.back() == '.') s += '0';        // Ensure "1." 閳?"1.0"
     }
     return s;
 }
@@ -377,7 +377,7 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
     };
 
     init_info_label(_L("Used Filament (m)"));
-    init_info_label(_L("Used Filament (mm³)"));
+    init_info_label(_L("Used Filament (mm椴?"));
     init_info_label(_L("Used Filament (g)"));
     init_info_label(_L("Used Materials"));
     init_info_label(_L("Cost"));
@@ -1979,7 +1979,7 @@ bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_man
     assert(obj->GetExtderSystem()->GetTotalExtderCount() == extruder_nums);
 
     // Multi-nozzle: resolve the nozzle option (pops MultiNozzleSyncDialog when is_manual). No-op for every
-    // existing printer — support_multi_nozzle is false unless some extruder_max_nozzle_count entry is a real
+    // existing printer 閳?support_multi_nozzle is false unless some extruder_max_nozzle_count entry is a real
     // value > 1 (nil-guarded, matching the manual/ToolOrdering gates), which no shipping single-nozzle or
     // dual-extruder profile sets. When the machine is multi-nozzle but no option resolves (e.g. user cancelled),
     // abort the sync.
@@ -4159,13 +4159,13 @@ void Sidebar::on_bed_type_change(BedType bed_type)
  * NetworkAgent APIs. The data pipeline is:
  *
  *   Printer Device (MQTT/LAN messages)
- *       ↓
+ *       閳?
  *   NetworkAgent (receives JSON, triggers OnMessageFn callbacks)
- *       ↓
+ *       閳?
  *   MachineObject::parse_json() (updates device state)
- *       ├── vt_slot (std::vector<DevAmsTray>) - virtual tray data for external filament
- *       └── DevFilaSystem → DevAms → DevAmsTray - AMS unit hierarchy
- *       ↓
+ *       閳规壕鏀㈤埞鈧?vt_slot (std::vector<DevAmsTray>) - virtual tray data for external filament
+ *       閳规柡鏀㈤埞鈧?DevFilaSystem 閳?DevAms 閳?DevAmsTray - AMS unit hierarchy
+ *       閳?
  *   build_filament_ams_list() [THIS FUNCTION] - aggregates into DynamicPrintConfig maps
  *
  * Data Sources:
@@ -9521,13 +9521,13 @@ void Plater::priv::replace_all_with_stl()
         std::string volume_name = volume->name;
 
         if (new_path == input_path) {
-            status += wxString::Format(_L("✖ Skipped %s: same file.\n"), from_u8(volume_name));
+            status += wxString::Format(_L("閴?Skipped %s: same file.\n"), from_u8(volume_name));
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " skipping replace volume : same filename " << new_path;
             continue;
         }
 
         if (!fs::exists(new_path)) {
-            status += wxString::Format(_L("✖ Skipped %s: file does not exist.\n"), from_u8(volume_name));
+            status += wxString::Format(_L("閴?Skipped %s: file does not exist.\n"), from_u8(volume_name));
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " cannot replace volume : filen does not exist " << new_path;
             continue;
         }
@@ -9535,12 +9535,12 @@ void Plater::priv::replace_all_with_stl()
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " replacing volume : " << input_path << " with " << new_path;
 
         if (!replace_volume_with_stl(object_idx, volume_idx, new_path, _u8L("Replace with 3D file"))) {
-            status += wxString::Format(_L("✖ Skipped %s: failed to replace.\n"), from_u8(volume_name));
+            status += wxString::Format(_L("閴?Skipped %s: failed to replace.\n"), from_u8(volume_name));
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " cannot replace volume : failed to replace with " << new_path;
             continue;
         }
 
-        status += wxString::Format(_L("✔ Replaced %s.\n"), from_u8(volume_name));
+        status += wxString::Format(_L("閴?Replaced %s.\n"), from_u8(volume_name));
     }
 
     // update 3D scene
@@ -10076,6 +10076,8 @@ void Plater::priv::set_current_panel(wxPanel* panel, bool no_slice)
             bool current_has_print_instances = current_plate->has_printable_instances();
             if (current_plate->is_slice_result_valid() && this->model.objects.empty() && !current_has_print_instances)
                 only_has_gcode_need_preview = true;
+            // Always reset slice-all flag when entering preview, so only the current plate is sliced.
+            this->m_slice_all = false;
 
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": from set_current_panel, no_slice %1%, export_in_progress %2%, model_fits %3%, m_is_slicing %4%")%no_slice%export_in_progress%model_fits%m_is_slicing;
 
@@ -10085,7 +10087,6 @@ void Plater::priv::set_current_panel(wxPanel* panel, bool no_slice)
                 //BBS: add more judge for slicing
                 if (!this->background_process.running() && !this->m_is_slicing)
                 {
-                    this->m_slice_all = false;
                     this->q->reslice();
                 }
                 else {
@@ -10096,7 +10097,6 @@ void Plater::priv::set_current_panel(wxPanel* panel, bool no_slice)
             }
             else if (only_has_gcode_need_preview)
             {
-                this->m_slice_all = false;
                 this->q->reslice();
             }
             //BBS: process empty plate, reset previous toolpath
@@ -11996,7 +11996,7 @@ bool Plater::priv::check_ams_status_impl(bool is_slice_all)
             // [Vortek] H2C: Use BBS-style NozzleGroupInfo comparison instead of direct nozzle type match.
             // This correctly handles Hybrid presets (which expand into per-type counts) and detects
             // never-synced state (nozzle_count==0) so the first sync dialog appears.
-            // After device sync, extruder_nozzle_stats matches printer → dialog suppressed.
+            // After device sync, extruder_nozzle_stats matches printer 閳?dialog suppressed.
             // Reference to BBS: BambuStudio/src/slic3r/GUI/Plater.cpp is_extruder_stat_synced()
             using namespace MultiNozzleUtils;
             auto nozzle_diameter_values = preset_bundle->printers.get_edited_preset().config.option<ConfigOptionFloatsNullable>("nozzle_diameter")->values;
@@ -12015,7 +12015,7 @@ bool Plater::priv::check_ams_status_impl(bool is_slice_all)
                         preset_nozzle_infos[extruder_id].emplace_back(preset_diameter, nvtStandard, extruder_id, std_count);
                     if (hf_count > 0)
                         preset_nozzle_infos[extruder_id].emplace_back(preset_diameter, nvtHighFlow, extruder_id, hf_count);
-                    // If both are 0 → never synced → empty group → will mismatch
+                    // If both are 0 閳?never synced 閳?empty group 閳?will mismatch
                 } else {
                     int count = getExtruderNozzleCount(preset_bundle, extruder_id, preset_volume_type);
                     preset_nozzle_infos[extruder_id].emplace_back(preset_diameter, preset_volume_type, extruder_id, count);
@@ -12027,7 +12027,7 @@ bool Plater::priv::check_ams_status_impl(bool is_slice_all)
             for (const auto& preset_groups : preset_nozzle_infos) {
                 for (const auto& preset_group : preset_groups) {
                     if (preset_group.nozzle_count == 0) {
-                        // Never synced: if printer has nozzles of this type → needs sync
+                        // Never synced: if printer has nozzles of this type 閳?needs sync
                         if (std::find_if(printer_groups.begin(), printer_groups.end(),
                                 [&preset_group](const NozzleGroupInfo& elem) { return preset_group.is_same_type(elem); })
                             != printer_groups.end()) {
@@ -13676,7 +13676,7 @@ void Plater::_calib_pa_pattern(const Calib_Params& params)
     if (accels.empty()) {
         accels.assign({accel});
         const auto msg{_L("INFO:") + "\n" +
-                       _L("No accelerations provided for calibration. Use default acceleration value ") + std::to_string(long(accel)) + _L(u8"mm/s²")};
+                       _L("No accelerations provided for calibration. Use default acceleration value ") + std::to_string(long(accel)) + _L(u8"mm/s铏?)};
         get_notification_manager()->push_notification(msg.utf8_string());
     } else {
         // set max acceleration in case of batch mode to get correct test pattern size
@@ -17346,7 +17346,7 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         // carry several of them, so the upload must name which plate to print via a 1-based plateindex.
         // Even a single-plate bundle needs it, since its gcode entry is still indexed. The host upload
         // forwards the field and servers that don't use it ignore it. "All plates" points at the
-        // current plate — the bundle still carries every plate's gcode.
+        // current plate 閳?the bundle still carries every plate's gcode.
         if (use_3mf) {
             const int plateindex = (plate_idx == PLATE_ALL_IDX ? get_partplate_list().get_curr_plate_index() : resolved_plate_idx) + 1;
             upload_job.upload_data.extended_info["plateindex"] = std::to_string(plateindex);
@@ -18879,8 +18879,8 @@ void Plater::validate_current_plate(bool& model_fits, bool& validate_error)
     // The toolbar Slice button is normally refreshed only by the canvas
     // (EVT_GLCANVAS_ENABLE_ACTION_BUTTONS) on geometry updates. When the missing-plugin block toggles
     // without a geometry change (e.g. a plugin finishing loading, or a setting edit that drops the
-    // last missing plugin), refresh it here — AFTER update_slice_ready_status set the plate's
-    // can_slice() flag that get_enable_slice_status() reads — so the button doesn't lag until the
+    // last missing plugin), refresh it here 閳?AFTER update_slice_ready_status set the plate's
+    // can_slice() flag that get_enable_slice_status() reads 閳?so the button doesn't lag until the
     // next bed click.
     if (plugins_block_changed && !p->background_process.running())
         p->main_frame->update_slice_print_status(MainFrame::eEventObjectUpdate, model_fits);
@@ -18971,7 +18971,7 @@ bool Plater::refresh_missing_plugin_block(bool* block_toggled)
            [this, inactive_refs](wxEvtHandler*) { enable_inactive_plugins(inactive_refs); return false; });
     update(NotificationType::OrcaPluginCapabilityUnavailableError, broken,
            &p->m_broken_shown_sig,
-           _u8L("The installed plugin does not provide the required capability — it may be outdated:"),
+           _u8L("The installed plugin does not provide the required capability 閳?it may be outdated:"),
            _u8L("Find on OrcaCloud"),
            [broken_refs](wxEvtHandler*) { open_missing_plugins_on_cloud(broken_refs); return false; });
 
@@ -19026,7 +19026,7 @@ void Plater::install_missing_cloud_plugins(const std::vector<std::string>& cloud
         }
         // Once cancellation is requested, the in-flight plugin still has to finish; reflect that.
         if (state->cancel)
-            msg = _u8L("Cancelling — finishing the current plugin...");
+            msg = _u8L("Cancelling 閳?finishing the current plugin...");
 
         if (!dialog->Pulse(from_u8(msg)))
             state->cancel = true;
@@ -19057,7 +19057,7 @@ void Plater::enable_inactive_plugins(const std::vector<std::string>& refs)
 {
     if (refs.empty())
         return;
-    // Local and instant — load the plugin and/or enable the capability. The plugin-load callback
+    // Local and instant 閳?load the plugin and/or enable the capability. The plugin-load callback
     // re-validates the plate and clears (or reclassifies) the notification; no progress dialog needed.
     resolve_inactive_plugins(refs);
 }
@@ -19065,7 +19065,7 @@ void Plater::enable_inactive_plugins(const std::vector<std::string>& refs)
 bool Plater::plugins_block_slicing() const
 {
     // Single source of truth: slicing is blocked while PluginResolver still has unresolved plugin
-    // references — missing (download), inactive (activate), or broken (capability unavailable).
+    // references 閳?missing (download), inactive (activate), or broken (capability unavailable).
     return has_missing_plugins() || has_inactive_plugins() || has_broken_plugins();
 }
 
@@ -19571,9 +19571,9 @@ void Plater::show_object_info()
         volume_val *= std::fabs(t.matrix().block(0, 0, 3, 3).determinant());
     volume_val = volume_val * pow(koef,3);
     if (imperial_units)
-        info_text += (boost::format(_utf8(L("Volume: %1% in³\n"))) %volume_val).str();
+        info_text += (boost::format(_utf8(L("Volume: %1% in椴乗n"))) %volume_val).str();
     else
-        info_text += (boost::format(_utf8(L("Volume: %1% mm³\n"))) %volume_val).str();
+        info_text += (boost::format(_utf8(L("Volume: %1% mm椴乗n"))) %volume_val).str();
     info_text += (boost::format(_utf8(L("Triangles: %1%\n"))) %face_count).str();
 
     wxString info_manifold;
