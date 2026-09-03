@@ -1,19 +1,20 @@
+get_filename_component(_TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
 # slic3rutils tests require libslic3r_gui (contains Http.cpp).
 # Skip entirely when GUI is disabled.
 if (NOT SLIC3R_GUI)
     return()
 endif()
 
-get_filename_component(_TEST_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
 add_executable(${_TEST_NAME}_tests
     ${_TEST_NAME}_tests_main.cpp
+    SnapLogClient_test.cpp
     )
 
 find_package(JPEG REQUIRED)
 find_package(PNG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(libnoise REQUIRED)
-find_package(Qhull REQUIRED)
+find_package(Qhull 7.2 QUIET)
 if(UNIX AND NOT APPLE)
     target_link_options(${_TEST_NAME}_tests PRIVATE "-Wl,--no-as-needed")
 endif()

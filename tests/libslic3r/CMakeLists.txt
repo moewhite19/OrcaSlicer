@@ -26,7 +26,9 @@ add_executable(${_TEST_NAME}_tests
 	test_voronoi.cpp
     test_optimizers.cpp
     test_png_io.cpp
+	test_sswcp_protocol.cpp
     test_indexed_triangle_set.cpp
+	TestMD5.cpp
     ../libnest2d/printer_parts.cpp
 	)
 
@@ -42,13 +44,13 @@ find_package(JPEG REQUIRED)
 find_package(PNG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(libnoise REQUIRED)
-find_package(Qhull REQUIRED)
+find_package(Qhull 7.2 QUIET)
 if(UNIX AND NOT APPLE)
     target_link_options(${_TEST_NAME}_tests PRIVATE "-Wl,--no-as-needed")
 endif()
 target_link_libraries(${_TEST_NAME}_tests PRIVATE ${TEST_LINK_LIBS})
 if (WIN32)
-    target_link_libraries(${_TEST_NAME}_tests PRIVATE bcrypt.lib)
+    target_link_libraries(${_TEST_NAME}_tests PRIVATE bcrypt.lib crypt32.lib)
 endif()
 set_property(TARGET ${_TEST_NAME}_tests PROPERTY FOLDER "tests")
 
