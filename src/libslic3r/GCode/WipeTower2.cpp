@@ -1539,6 +1539,7 @@ void WipeTower2::set_extruder(size_t idx, const PrintConfig& config)
 
     m_filpar[idx].material = config.filament_type.get_at(idx);
     m_filpar[idx].is_soluble = config.filament_soluble.get_at(idx);
+    m_filpar[idx].is_support = config.filament_is_support.get_at(idx);
     m_filpar[idx].temperature = get_value_at(config, config.nozzle_temperature, ConfigFlowDomain::Filament, idx);
     m_filpar[idx].first_layer_temperature              = get_value_at(config, config.nozzle_temperature_initial_layer, ConfigFlowDomain::Filament, idx);
     m_filpar[idx].filament_minimal_purge_on_wipe_tower = get_value_at(config, config.filament_minimal_purge_on_wipe_tower, ConfigFlowDomain::Filament, idx);
@@ -3504,13 +3505,25 @@ int WipeTower2::get_wall_filament_for_layer(const WipeTowerInfo& layer)
     if (layer.tool_changes.empty()) {
         return -1;
     }
+    // The wipe tower (rib) outer wall must not be printed with a support or a
+    // soluble-support filament, so skip those when picking the wall filament.
+    auto is_wall_filament_candidate = [this](size_t tool) {
+        return tool < m_filpar.size() && !m_filpar[tool].is_soluble && !m_filpar[tool].is_support;
+    };
+    if (m_wall_filament > 0 && is_wall_filament_candidate(size_t(m_wall_filament - 1))) {
+        return m_wall_filament - 1;
+    }
+    for (const WipeTowerInfo::ToolChange& tool_change : layer.tool_changes)
+        if (is_wall_filament_candidate(tool_change.new_tool))
+            return int(tool_change.new_tool);
+    for (const WipeTowerInfo::ToolChange& tool_change : layer.tool_changes)
+        if (is_wall_filament_candidate(tool_change.old_tool))
+            return int(tool_change.old_tool);
+    // All filaments on this layer are support / soluble-support: keep the legacy behaviour.
     if (m_wall_filament > 0) {
         return m_wall_filament - 1;
     }
-    if (!layer.tool_changes.empty()) {
-        return layer.tool_changes[0].new_tool;
-    }
-    return -1;
+    return int(layer.tool_changes[0].new_tool);
 }
 
 void WipeTower2::generate_new(std::vector<std::vector<WipeTower::ToolChangeResult>>& result, 

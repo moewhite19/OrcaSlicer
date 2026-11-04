@@ -154,6 +154,7 @@ public:
     struct FilamentParameters {
         std::string 	    material = "PLA";
         bool                is_soluble = false;
+        bool                is_support = false;
         int  			    temperature = 0;
         int  			    first_layer_temperature = 0;
         float               loading_speed = 0.f;
