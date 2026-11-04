@@ -50,7 +50,6 @@ class PrintHostQueueDialog;
 class Plater;
 class MainFrame;
 class ParamsDialog;
-class SliceModePopup;
 
 enum QuickSlice
 {
@@ -359,6 +358,7 @@ public:
     void        load_url(wxString url);
     void        load_printer_url(wxString url, wxString apikey = "");
     void        load_printer_url();
+    void        reload_gateway_pages();
     bool        is_printer_view() const;
     void        refresh_plugin_tips();
     void        RunScript(wxString js);
@@ -414,7 +414,6 @@ public:
     SideButton* m_slice_option_btn{ nullptr };
     SideButton* m_print_btn{ nullptr };
     SideButton* m_print_option_btn{ nullptr };
-    SliceModePopup* m_slice_mode_popup{ nullptr };
     mutable bool          m_slice_enable{ true };
     mutable bool          m_print_enable{ true };
     bool                  m_shutting_down{ false };
@@ -433,6 +432,12 @@ public:
     uint32_t  			m_ulSHChangeNotifyRegister { 0 };
 	static constexpr int WM_USER_MEDIACHANGED { 0x7FFF }; // WM_USER from 0x0400 to 0x7FFF, picking the last one to not interfere with wxWidgets allocation
 #endif // _WIN32
+
+private:
+    // Initial button state path for the MainFrame constructor; bypasses the
+    // teardown guard in update_slice_print_status (wxGetApp().mainframe does
+    // not point at this frame yet during construction).
+    void update_slice_print_status_impl(SlicePrintEventType event, bool can_slice, bool can_print);
 };
 
 wxDECLARE_EVENT(EVT_HTTP_ERROR, wxCommandEvent);

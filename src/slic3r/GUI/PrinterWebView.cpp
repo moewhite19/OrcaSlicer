@@ -15,7 +15,7 @@
 #include <slic3r/GUI/Widgets/WebView.hpp>
 #include <wx/webview.h>
 #include "slic3r/GUI/SSWCP.hpp"
-#include "sentry_wrapper/SentryWrapper.hpp"
+#include "app_common/SentryWrapper.hpp"
 
 namespace pt = boost::property_tree;
 
@@ -28,17 +28,17 @@ PrinterWebView::PrinterWebView(wxWindow *parent)
 
     wxBoxSizer* topsizer = new wxBoxSizer(wxVERTICAL);
 
-    wxString url      = wxGetApp().build_flutter_web_url("2");
-    auto     real_url = wxGetApp().get_international_url(url);
-      // Create the webview
-    m_browser = WebView::CreateWebView(this, real_url);
+    // Load the real URL only in load_url(). Creating with Flutter here races the later
+    // missing_connection / path=2 LoadURL and cancels the in-flight document (-999).
+    m_browser = WebView::CreateWebView(this, "about:blank");
     if (m_browser == nullptr) {
         wxLogError("Could not init m_browser");
         return;
     }
 
-    m_browser->Bind(wxEVT_WEBVIEW_ERROR, &PrinterWebView::OnError, this);
-    m_browser->Bind(wxEVT_WEBVIEW_LOADED, &PrinterWebView::OnLoaded, this);
+    // Panel bind so WebViewWebKit's navigation gate (also on the webview) still sees LOADED/ERROR.
+    Bind(wxEVT_WEBVIEW_ERROR, &PrinterWebView::OnError, this, m_browser->GetId());
+    Bind(wxEVT_WEBVIEW_LOADED, &PrinterWebView::OnLoaded, this, m_browser->GetId());
     m_browser->Bind(wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, &PrinterWebView::OnScriptMessage, this, m_browser->GetId());
 
     SetSizer(topsizer);
@@ -72,15 +72,16 @@ void PrinterWebView::load_url(wxString& url, wxString apikey)
     if (m_browser == nullptr)
         return;
     m_apikey = apikey;
+    BOOST_LOG_TRIVIAL(warning) << "[FLUTTER_FLOW] [webview] [navigation_requested] view=device url=" << url.ToUTF8().data();
 
-    if (url.find("path=2") != std::string::npos) {
+    if (wxGetApp().is_gateway_url(url)) {
         wxGetApp().fltviews().add_printer_view(this, url, apikey);
     } else {
         wxGetApp().fltviews().remove_printer_view(this);
     }
 
     m_browser->Show();
-    m_browser->LoadURL(url);
+    WebView::LoadUrl(m_browser, url);
 
     UpdateState();
 }
@@ -95,7 +96,16 @@ bool PrinterWebView::isSnapmakerPage()
     if (m_browser == nullptr)
         return false;
     auto url = m_browser->GetCurrentURL();
-    return (url.find("flutter_web") != std::string::npos);
+    return wxGetApp().is_gateway_url(url);
+}
+
+bool PrinterWebView::is_u1_device_page()
+{
+    if (m_browser == nullptr)
+        return false;
+    auto url = m_browser->GetCurrentURL();
+    return url.find("flutter_web") != std::string::npos &&
+           (url.find("path=2") != std::string::npos || url.find("/device_control") != std::string::npos);
 }
 
 void PrinterWebView::sendMessage(const std::string& msg) {
@@ -189,6 +199,7 @@ void PrinterWebView::SendAPIKey()
 
 void PrinterWebView::OnError(wxWebViewEvent &evt)
 {
+    evt.Skip();
     auto e = "unknown error";
     switch (evt.GetInt()) {
       case wxWEBVIEW_NAV_ERR_CONNECTION:
@@ -221,10 +232,12 @@ void PrinterWebView::OnError(wxWebViewEvent &evt)
 
 void PrinterWebView::OnLoaded(wxWebViewEvent &evt)
 {
+    evt.Skip();
     if (evt.GetURL().IsEmpty())
         return;
     if (evt.GetURL() != m_browser->GetCurrentURL())
         return;
+    BOOST_LOG_TRIVIAL(warning) << "[FLUTTER_FLOW] [webview] [navigation_loaded] view=device url=" << evt.GetURL().ToUTF8().data();
     SendAPIKey();
 }
 

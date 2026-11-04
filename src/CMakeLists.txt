@@ -299,16 +299,84 @@ if(ORCA_TOOLS)
     endif()
 endif()
 
+# -----------------------------------------------------------------------
+# app_common: app-layer glue static library (sentry wrapper / product
+# identity & machine info / crash stack / bury-point state).
+# Sources live in src/app_common/ (moved from src/sentry_wrapper,
+# src/bury_cfg, and dev-utils' BaseException/StackWalker).
+# common_func stays in src/common_func/ (libslic3r etc. only consume its
+# compile-time macros and must not depend back on app_common), but
+# common_func.cpp is compiled here because SentryWrapper.obj references
+# common:: symbols required by libslic3r_gui's symbol closure.
+# Purpose: make libslic3r_gui's symbol closure self-contained - app-layer
+# symbols are provided by this library so third-party consumers (tests,
+# headless tools) can link the GUI library without stub files, the
+# Snapmaker_Orca import library, or platform gating.
+# Single supplier: every image (Snapmaker_Orca DLL/exe, the Windows shim,
+# libslic3r_gui consumers) links this archive instead of compiling the
+# glue sources directly, so each image holds exactly one copy of the glue
+# symbols and no link-order / lazy-extraction invariant applies. Sources
+# unique to this library can therefore be added safely.
+# On Windows the archive is compiled with BURY_EXPORTS: members linked into
+# an image export the accessors from that image (Snapmaker_Orca.dll and the
+# shim each export their own copy; no cross-image import is introduced).
+# Built unconditionally (not gated on SLIC3R_GUI): the headless build has
+# no libslic3r_gui to carry the glue symbols, so the production exe must
+# be able to link this library directly in the GUI=OFF configuration too.
+# -----------------------------------------------------------------------
+add_library(app_common STATIC
+    app_common/SentryWrapper.hpp
+    app_common/SentryWrapper.cpp
+    common_func/common_func.hpp
+    common_func/common_func.cpp
+    app_common/bury_point.hpp
+    app_common/bury_point.cpp
+)
+if (WIN32)
+    target_sources(app_common PRIVATE
+        app_common/BaseException.h
+        app_common/BaseException.cpp
+        app_common/StackWalker.h
+        app_common/StackWalker.cpp
+    )
+endif ()
+if (WIN32)
+    # The archive members are the single bury-state copy in every image
+    # that links this library; dllexport here reproduces the per-image
+    # export surface the direct-compilation phase-1 targets provided
+    # (Snapmaker_Orca.dll and the shim each export the accessors from
+    # their own copy - no cross-image import is introduced).
+    target_compile_definitions(app_common PRIVATE BURY_EXPORTS)
+endif ()
+# Headers are included as "app_common/..." relative to the src/ root:
+# files directly under src/ (Snapmaker_Orca.cpp etc.) resolve them via
+# quoted-include lookup in the includer's directory; GUI-internal files
+# resolve them via the PUBLIC include dir below.
+target_include_directories(app_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(app_common PRIVATE boost_headeronly nlohmann_json)
+if (WIN32)
+    # common_func.cpp: RegOpenKeyEx / SHGetKnownFolderPath
+    # (iphlpapi and version.lib are pulled in via in-source #pragma)
+    # PRIVATE is the accurate scope (only common_func.cpp needs these);
+    # on a STATIC library it still reaches consumers' link lines
+    # (LINK_ONLY), matching what INTERFACE did here.
+    target_link_libraries(app_common PRIVATE Advapi32 Shell32)
+endif ()
+if (SLIC3R_SENTRY)
+    target_compile_definitions(app_common PRIVATE SLIC3R_SENTRY)
+    target_link_libraries(app_common PRIVATE sentry::sentry)
+endif ()
+encoding_check(app_common)
+
 # Create a slic3r executable
 # Process mainfests for various platforms.
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/msw/Snapmaker_Orca.rc.in ${CMAKE_CURRENT_BINARY_DIR}/Snapmaker_Orca.rc @ONLY)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/msw/Snapmaker_Orca.manifest.in ${CMAKE_CURRENT_BINARY_DIR}/Snapmaker_Orca.manifest @ONLY)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dev-utils/platform/osx/Info.plist.in ${CMAKE_CURRENT_BINARY_DIR}/Info.plist @ONLY)
 if (WIN32)
-    add_library(Snapmaker_Orca SHARED Snapmaker_Orca.cpp Snapmaker_Orca.hpp dev-utils/BaseException.cpp dev-utils/BaseException.h dev-utils/StackWalker.cpp dev-utils/StackWalker.h sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp)
-    target_compile_definitions(Snapmaker_Orca PRIVATE BURY_EXPORTS)
+    add_library(Snapmaker_Orca SHARED Snapmaker_Orca.cpp Snapmaker_Orca.hpp)
 else ()
-    add_executable(Snapmaker_Orca Snapmaker_Orca.cpp Snapmaker_Orca.hpp sentry_wrapper/SentryWrapper.hpp sentry_wrapper/SentryWrapper.cpp bury_cfg/bury_point.hpp bury_cfg/bury_point.cpp common_func/common_func.hpp common_func/common_func.cpp)
+    add_executable(Snapmaker_Orca Snapmaker_Orca.cpp Snapmaker_Orca.hpp)
 endif ()
 
 if (MINGW)
@@ -324,6 +392,11 @@ if (NOT WIN32 AND NOT APPLE)
 endif ()
 
 target_link_libraries(Snapmaker_Orca libslic3r cereal::cereal)
+# Glue symbols (sentry wrapper / bury-point / common_func) are supplied by
+# the app_common archive instead of being compiled into this target; linked
+# unconditionally (not only under SLIC3R_GUI) because the headless build has
+# no libslic3r_gui to carry them transitively.
+target_link_libraries(Snapmaker_Orca app_common)
 # target_include_directories(OrcaSlicer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/slic3r)
 if (APPLE)
 #    add_compile_options(-stdlib=libc++)
@@ -343,6 +416,9 @@ endif ()
 if (SLIC3R_GUI)
 #    target_link_libraries(Snapmaker_Orca ws2_32 uxtheme setupapi libslic3r_gui ${wxWidgets_LIBRARIES})
 target_link_libraries(Snapmaker_Orca libslic3r_gui)
+# Building this target directly (as IDEs do) must still mirror the Snapmaker
+# profiles into the source resources tree before the app runs.
+add_dependencies(Snapmaker_Orca sync_snapmaker_profiles)
     if (MSVC)
         # Generate debug symbols even in release mode.
         target_link_options(Snapmaker_Orca PUBLIC "$<$<CONFIG:RELEASE>:/DEBUG>")
@@ -374,19 +450,32 @@ if (WIN32)
     endif()
 
     
-    add_executable(Snapmaker_Orca_app_gui WIN32 Snapmaker_Orca_app_msvc.cpp sentry_wrapper/SentryWrapper.cpp common_func/common_func.cpp ${CMAKE_CURRENT_BINARY_DIR}/Snapmaker_Orca.rc)
+    # The shim links the app_common archive (compiled with BURY_EXPORTS,
+    # mirroring the Snapmaker_Orca DLL image) so it resolves its bury-point
+    # helpers locally from its own copy instead of importing them from
+    # Snapmaker_Orca.dll. The shim must
+    # NOT statically depend on Snapmaker_Orca.dll: that DLL statically imports
+    # opengl32.dll, which the loader maps BEFORE wmain runs - the system
+    # opengl32.dll could then never be released and would forever shadow the
+    # MESA opengl32.dll the shim loads for the software-OpenGL fallback
+    # (see Snapmaker_Orca_app_msvc.cpp).
+    add_executable(Snapmaker_Orca_app_gui WIN32 Snapmaker_Orca_app_msvc.cpp ${CMAKE_CURRENT_BINARY_DIR}/Snapmaker_Orca.rc)
     # Generate debug symbols even in release mode.
     if(MSVC)
         target_link_options(Snapmaker_Orca_app_gui PUBLIC "$<$<CONFIG:RELEASE>:/DEBUG>")
     endif()
+    # The shim links the app_common archive (compiled with BURY_EXPORTS), so
+    # its bury-point state is still self-hosted per-image and independent of
+    # Snapmaker_Orca.dll (see the MESA/opengl32 note above).
     target_compile_definitions(Snapmaker_Orca_app_gui PRIVATE -DSLIC3R_WRAPPER_NOCONSOLE)
+    target_link_libraries(Snapmaker_Orca_app_gui PRIVATE app_common)
     add_dependencies(Snapmaker_Orca_app_gui Snapmaker_Orca)
     set_target_properties(Snapmaker_Orca_app_gui PROPERTIES OUTPUT_NAME "snapmaker-orca")
-    
+
     if (SLIC3R_SENTRY)
-        target_link_libraries(Snapmaker_Orca_app_gui PRIVATE boost_headeronly sentry::sentry nlohmann_json Snapmaker_Orca)
+        target_link_libraries(Snapmaker_Orca_app_gui PRIVATE boost_headeronly sentry::sentry nlohmann_json)
     else()
-        target_link_libraries(Snapmaker_Orca_app_gui PRIVATE boost_headeronly nlohmann_json Snapmaker_Orca)
+        target_link_libraries(Snapmaker_Orca_app_gui PRIVATE boost_headeronly nlohmann_json)
     endif()
     if (SLIC3R_SENTRY)
         target_compile_definitions(Snapmaker_Orca_app_gui PRIVATE SLIC3R_SENTRY)
@@ -496,7 +585,8 @@ else ()
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "Snapmaker Orca"
             MACOSX_BUNDLE_SHORT_VERSION_STRING ${Snapmaker_VERSION}
-            MACOSX_BUNDLE_COPYRIGHT "Copyright © 2024-2026 Snapmaker. All rights reserved.")
+            MACOSX_BUNDLE_COPYRIGHT "Copyright © 2024-2026 Snapmaker. All rights reserved."
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/modules/MacOSXBundleInfo.plist.in")
         # Get the bundle directory by going up from the executable to the .app bundle
         if (CMAKE_CONFIGURATION_TYPES)
             set(BIN_RESOURCES_DIR "$<TARGET_FILE_DIR:Snapmaker_Orca>/../Resources")
@@ -552,6 +642,15 @@ if (WIN32)
         install(TARGETS Snapmaker_Orca_app_gui RUNTIME DESTINATION ".")
     endif ()
     install(FILES ${output_dlls_${build_type}} DESTINATION ".")
+    # MESA llvmpipe software-OpenGL fallback: the snapmaker-orca.exe shim loads
+    # <install>/mesa/opengl32.dll before Snapmaker_Orca.dll whenever the system
+    # OpenGL driver is unusable (< 2.0, e.g. disabled GPU -> GDI generic 1.1),
+    # see src/Snapmaker_Orca_app_msvc.cpp and deps/mesa/README.md.
+    if (EXISTS "${CMAKE_SOURCE_DIR}/deps/mesa/x64/opengl32.dll")
+        install(FILES "${CMAKE_SOURCE_DIR}/deps/mesa/x64/opengl32.dll" DESTINATION "mesa")
+    else ()
+        message(WARNING "deps/mesa/x64/opengl32.dll not found: the MESA software OpenGL fallback will NOT be packaged (see deps/mesa/README.md).")
+    endif ()
 else ()
     install(TARGETS Snapmaker_Orca RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif ()

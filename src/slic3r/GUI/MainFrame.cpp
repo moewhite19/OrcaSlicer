@@ -25,6 +25,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/SLAPrint.hpp"
 #include "libslic3r/PresetBundle.hpp"
+#include "libslic3r/Utils.hpp"
 #include "libslic3r/Zipper.hpp"
 
 #include "Tab.hpp"
@@ -42,6 +43,7 @@
 #include "Plater.hpp"
 #include "WebViewDialog.hpp"
 #include "../Utils/Process.hpp"
+#include "../Utils/GatewayService.hpp"
 #include "format.hpp"
 // BBS
 #include "PartPlate.hpp"
@@ -59,7 +61,6 @@
 #include "GUI_App.hpp"
 #include "FilamentGroupDialog.hpp"
 #include "FlowTypeHelper.hpp"
-#include "SliceModePopup.hpp"
 #include "UnsavedChangesDialog.hpp"
 #include "MsgDialog.hpp"
 #include "Notebook.hpp"
@@ -81,7 +82,7 @@
 #pragma comment(lib, "Wtsapi32.lib")
 #endif // _WIN32
 #include <slic3r/GUI/CreatePresetsDialog.hpp>
-#include "sentry_wrapper/SentryWrapper.hpp"
+#include "app_common/SentryWrapper.hpp"
 #include "GenericDownloadDialog.hpp"
 
 #define UPDATE_BUSER    true
@@ -315,7 +316,13 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     default:
     case GUI_App::EAppMode::Editor:
         m_taskbar_icon = std::make_unique<Snapmaker_OrcaTaskBarIcon>(wxTBI_DOCK);
-        m_taskbar_icon->SetIcon(wxIcon(Slic3r::var("Snapmaker_Orca-mac_256px.ico"), wxBITMAP_TYPE_ICO), "Snapmaker Orca");
+        // Do not set a custom Dock icon: NSApp.applicationIconImage renders the
+        // raw image in the Dock tile, bypassing the macOS 26 native icon
+        // pipeline, so the legacy ico (with baked-in margins) shows a size
+        // smaller than neighboring tiles. Let the Dock use the bundle icon
+        // (layered .icon with icns fallback) instead. The right-click "New
+        // Window" menu is unaffected: it is attached by the wxTaskBarIcon
+        // constructor, not by SetIcon.
         break;
     case GUI_App::EAppMode::GCodeViewer:
         break;
@@ -494,6 +501,12 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     // declare events
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< ": mainframe received close_widow event";
+        // Session end: no interaction, no teardown - wx deletes all windows
+        // under us (Sentry SNAPMAKER_ORCA-1H6, see GUI_App QUERY_END_SESSION).
+        if (wxGetApp().in_session_end()) {
+            event.Skip();
+            return;
+        }
         if (event.CanVeto() && m_plater->get_view3D_canvas3D()->get_gizmos_manager().is_in_editing_mode(true)) {
             // prevents to open the save dirty project dialog
             event.Veto();
@@ -579,7 +592,9 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
 
     if (m_plater != nullptr) {
         // BBS
-        update_slice_print_status(eEventSliceUpdate, true, true);
+        // Constructor-time init: bypass the teardown guard in
+        // update_slice_print_status — mainframe is not registered yet.
+        update_slice_print_status_impl(eEventSliceUpdate, true, true);
 
         // BBS: backup project
         if (wxGetApp().app_config->get("backup_switch") == "true") {
@@ -842,14 +857,21 @@ WXLRESULT MainFrame::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam
         AdjustWorkingAreaForAutoHide(hWnd, mmi);
         return 0;
     }
+    case WM_ENDSESSION:
+        // wx ignores the wParam=0 "session cancelled" broadcast; without this
+        // reset the session-end guards would silently discard unsaved changes
+        // on every later manual close.
+        if (wParam == 0)
+            wxGetApp().reset_session_end();
+        break;
     case WM_WTSSESSION_CHANGE: {
         switch (wParam) {
         case WTS_SESSION_LOCK:
-            BOOST_LOG_TRIVIAL(warning) << "[ACTIVATE_EVT] Windows session locked";
+            BOOST_LOG_TRIVIAL(debug) << "[ACTIVATE_EVT] Windows session locked";
             wxGetApp().notify_foreground_change(false);
             break;
         case WTS_SESSION_UNLOCK:
-            BOOST_LOG_TRIVIAL(warning) << "[ACTIVATE_EVT] Windows session unlocked";
+            BOOST_LOG_TRIVIAL(debug) << "[ACTIVATE_EVT] Windows session unlocked";
             wxGetApp().notify_foreground_change(true);
             break;
         }
@@ -862,7 +884,7 @@ WXLRESULT MainFrame::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam
                 // GUID_CONSOLE_DISPLAY_STATE Data: 0x0=off, 0x1=on, 0x2=dimmed
                 DWORD display_state = power_settings->Data[0];
                 bool is_screen_on = (display_state == 0x1);
-                BOOST_LOG_TRIVIAL(warning) << "[ACTIVATE_EVT] Console display state changed: "
+                BOOST_LOG_TRIVIAL(debug) << "[ACTIVATE_EVT] Console display state changed: "
                                            << (is_screen_on ? "on" : (display_state == 0x2 ? "dimmed" : "off"));
                 wxGetApp().notify_foreground_change(is_screen_on);
             }
@@ -1647,9 +1669,6 @@ bool MainFrame::can_send_gcode() const
 {
     if (m_plater && !m_plater->model().objects.empty())
     {
-        auto        devices     = wxGetApp().app_config->get_devices();
-        const auto& edit_preset = wxGetApp().preset_bundle->printers.get_edited_preset();
-
         auto printer_config    = wxGetApp().preset_bundle->printers.get_edited_preset().config;
         auto printer_model_opt = printer_config.option<ConfigOptionString>("printer_model");
         bool is_snapmaker_u1   = false;
@@ -1663,7 +1682,7 @@ bool MainFrame::can_send_gcode() const
             return true;
         }
 
-        if (wxGetApp().app_config->get("use_new_connect") == "true") {
+        if (wxGetApp().physical_printer_connected()) {
             return true;
         } else {
             auto cfg = wxGetApp().preset_bundle->printers.get_edited_preset().config;
@@ -1754,20 +1773,6 @@ wxBoxSizer* MainFrame::create_side_tools()
     sizer->Add(m_print_option_btn, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(2));
     sizer->Add(m_print_btn       , 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, FromDIP(19));
 
-    // Snapmaker requirement 7.1: hover popup on the slice button for choosing the
-    // standard / custom filament grouping mode. Shown only when the nozzles mix flow
-    // variant types (>= 2 distinct across the per-nozzle flow combos) AND at least one
-    // filament actually supports high flow -- otherwise there is nothing to group, so
-    // slicing routes every filament to its single nozzle type.
-    m_slice_mode_popup = new SliceModePopup(this);
-    auto try_show_slice_mode_popup = [this](wxMouseEvent &e) {
-        e.Skip();
-        if (m_slice_enable && GUI::FlowType::distinct_nozzle_flow_type_count() >= 2)
-            m_slice_mode_popup->ShowFor({m_slice_btn, m_slice_option_btn}, m_slice_btn);
-    };
-    m_slice_btn->Bind(wxEVT_ENTER_WINDOW, try_show_slice_mode_popup);
-    m_slice_option_btn->Bind(wxEVT_ENTER_WINDOW, try_show_slice_mode_popup);
-
     sizer->Layout();
 
     // m_publish_btn->Bind(wxEVT_BUTTON, [this](auto& e) {
@@ -1787,16 +1792,9 @@ wxBoxSizer* MainFrame::create_side_tools()
 
     m_slice_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent& event)
         {
-            if (m_slice_mode_popup)
-                m_slice_mode_popup->HidePopup();
-            // Snapmaker requirement 7.1: the custom per-filament grouping applies only
-            // in custom mode with mixed nozzle flow types -- then confirm the mapping
-            // before slicing (both "Slice plate" and "Slice all" go through this
-            // button). Otherwise every filament follows the single selected nozzle
-            // flow type (all standard -> standard, all high flow -> high flow; standard
-            // mode with mixed nozzles falls back to standard), dropping stale mappings.
-            if (GUI::FlowType::grouping_mode() == FILAMENT_GROUPING_CUSTOM && GUI::FlowType::distinct_nozzle_flow_type_count() >= 2) {
-                GUI::FilamentGroupDialog dlg(this);
+            if (GUI::FlowType::any_nozzle_high_flow()) {
+                bool all_high_flow = GUI::FlowType::distinct_nozzle_flow_type_count() < 2;
+                GUI::FilamentGroupDialog dlg(this, all_high_flow);
                 if (dlg.ShowModal() != wxID_OK)
                     return;
             } else {
@@ -1845,8 +1843,6 @@ wxBoxSizer* MainFrame::create_side_tools()
 
     m_slice_option_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent& event)
         {
-            if (m_slice_mode_popup)
-                m_slice_mode_popup->HidePopup();
             SidePopup* p = new SidePopup(this);
             SideButton* slice_all_btn = new SideButton(p, _L("Slice all"), "");
             slice_all_btn->SetCornerRadius(0);
@@ -2211,6 +2207,32 @@ void MainFrame::update_side_button_style()
 
 void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_slice, bool can_print)
 {
+    // Stale callbacks may still reach this after the frame was torn down by
+    // recreate_GUI / shutdown; skip the UI update and log loudly in that
+    // state. The leading checks do not dereference this.
+    //
+    // The MainFrame constructor updates its initial button state through
+    // update_slice_print_status_impl instead: at construction time
+    // wxGetApp().mainframe does not point at this frame yet, so going
+    // through this entry the mainframe != this check would always fire and
+    // log a false PROBE-ABNORMAL on every startup / recreate.
+    MainFrame* live_frame = wxGetApp().mainframe;
+    if ((live_frame && live_frame != this) || m_shutting_down || IsBeingDeleted()) {
+        std::string probe = std::string(__FUNCTION__) + " PROBE-ABNORMAL"
+            + " event=" + std::to_string(static_cast<int>(event))
+            + " can_slice=" + std::to_string(can_slice)
+            + " can_print=" + std::to_string(can_print)
+            + " stale_this=" + std::to_string(live_frame != this)
+            + " being_deleted=" + std::to_string(IsBeingDeleted())
+            + " shutting_down=" + std::to_string(m_shutting_down);
+        BOOST_LOG_TRIVIAL(warning) << probe;
+        return;
+    }
+    update_slice_print_status_impl(event, can_slice, can_print);
+}
+
+void MainFrame::update_slice_print_status_impl(SlicePrintEventType event, bool can_slice, bool can_print)
+{
     bool enable_print = true, enable_slice = true;
 
     if (event == eEventPlateUpdate)
@@ -2405,7 +2427,7 @@ static wxMenu* generate_help_menu()
     append_menu_item(
         helpMenu, wxID_ANY, _L("Check for Update"), _L("Check for Update"),
         [](wxCommandEvent&) {
-            wxGetApp().check_new_version_sf(true, UPDATE_BUSER);
+            wxGetApp().request_version_from_config(true, UPDATE_BUSER);
         }, "", nullptr, []() {
             return true;
         });
@@ -2418,19 +2440,8 @@ static wxMenu* generate_help_menu()
         },
         "", nullptr, []() { return true; });
 
-    append_menu_item(
-        helpMenu, wxID_ANY, _L("Check for Web Resource Updates"), _L("Check for Web Resource Updates"),
-        [](wxCommandEvent&) { 
-            wxGetApp().check_web_version();
-        },
-        "", nullptr, []() { return true; });
-
     append_menu_item(helpMenu, wxID_ANY, _L("Import Profile"), _L("Import Profile"), [](wxCommandEvent&) {
         wxGetApp().import_presets();
-    });
-
-    append_menu_item(helpMenu, wxID_ANY, _L("Import Web Resource"), _L("Import Web Resource"), [](wxCommandEvent&) {
-        wxGetApp().import_flutter_web();
     });
 
     append_menu_item(helpMenu, wxID_ANY, _L("Open Network Test"), _L("Open Network Test"), [](wxCommandEvent&) {
@@ -2989,10 +3000,17 @@ void MainFrame::init_menubar_as_editor()
             PreferencesDialog dlg(this);
             dlg.ShowModal();
             plater()->get_current_canvas3D()->force_set_focus();
+            // GPU accel toggle: applied once after the dialog closes (mirrors
+            // GUI_App::open_preferences; this Apple-menu entry shows its own
+            // PreferencesDialog). The full reload subsumes the seq-view
+            // refresh, so run that only when the GPU toggle did not change
+            // (avoids a double rebuild).
+            if (dlg.gcode_gpu_accel_changed())
+                plater()->reload_gcode_preview();
 #if ENABLE_GCODE_LINES_ID_IN_H_SLIDER
-            if (dlg.seq_top_layer_only_changed() || dlg.seq_seq_top_gcode_indices_changed())
+            else if (dlg.seq_top_layer_only_changed() || dlg.seq_seq_top_gcode_indices_changed())
 #else
-            if (dlg.seq_top_layer_only_changed())
+            else if (dlg.seq_top_layer_only_changed())
 #endif
                 plater()->refresh_print();
         },
@@ -4071,6 +4089,18 @@ void MainFrame::load_printer_url()
     }
 }
 
+void MainFrame::reload_gateway_pages()
+{
+    const auto gateway_service = wxGetApp().gateway_service();
+    wxString   home_url        = gateway_service ? wxString::FromUTF8(gateway_service->web_url("home_page")) : wxString{};
+    if (m_webview != nullptr && !home_url.empty())
+        m_webview->load_url(home_url);
+
+    wxString device_url = gateway_service ? wxString::FromUTF8(gateway_service->web_url("device_control")) : wxString{};
+    if (!device_url.empty())
+        load_printer_url(device_url);
+}
+
 bool MainFrame::is_printer_view() const { return m_tabpanel->GetSelection() == TabPosition::tpMonitor; }
 
 
@@ -4088,7 +4118,7 @@ void MainFrame::RunScript(wxString js)
 
 void MainFrame::NotifyActivateChange(bool active)
 {
-    BOOST_LOG_TRIVIAL(warning) << "[ACTIVATE_EVT] OrcaSlicer switched to " << (active ? "foreground" : "background");
+    BOOST_LOG_TRIVIAL(debug) << "[ACTIVATE_EVT] OrcaSlicer switched to " << (active ? "foreground" : "background");
     wxGetApp().notify_foreground_change(active);
 }
 
@@ -4175,17 +4205,14 @@ void MainFrame::show_sync_dialog()
 
 void MainFrame::export_logs()
 {
-    // 1. Get log folder path
-    auto log_folder = boost::filesystem::path(data_dir()) / "log";
-
-    // 2. Check if log folder exists
-    if (!boost::filesystem::exists(log_folder) || boost::filesystem::is_empty(log_folder)) {
+    // 1. Check both the application and Snapmaker Control log folders for exportable files.
+    if (collect_log_export_files(boost::filesystem::path(data_dir())).empty()) {
         MessageDialog dlg(this, _L("No logs found."), _L("Export Logs"), wxOK | wxICON_INFORMATION);
         dlg.ShowModal();
         return;
     }
 
-    // 3. Show save file dialog
+    // 2. Show save file dialog
     std::time_t t = std::time(0);
     std::tm* now_time = std::localtime(&t);
     std::stringstream buf;
@@ -4209,34 +4236,29 @@ void MainFrame::export_logs()
     // Write version info and flush to log file before zipping
     GUI_App::log_version_info();
 
-    // 4. Create ZIP file and add all logs
+    // 3. Create ZIP file and add logs from both directories. Refresh the list after version info is flushed.
     try {
-        Zipper zipper(into_u8(zip_path), Zipper::TIGHT_COMPRESSION);
+        const auto log_files = collect_log_export_files(boost::filesystem::path(data_dir()));
+        Zipper     zipper(into_u8(zip_path), Zipper::TIGHT_COMPRESSION);
 
-        // Iterate through log directory
-        for (auto& entry : boost::filesystem::directory_iterator(log_folder)) {
-            if (boost::filesystem::is_regular_file(entry.path())) {
-                std::string filename = entry.path().filename().string();
-
-                // Read file content
-                std::ifstream file(entry.path().string(), std::ios::binary);
-                if (!file.is_open()) {
-                    BOOST_LOG_TRIVIAL(warning) << "Failed to open log file: " << entry.path().string();
-                    continue;
-                }
-
-                std::string content((std::istreambuf_iterator<char>(file)),
-                                   std::istreambuf_iterator<char>());
-                file.close();
-
-                // Add to ZIP
-                zipper.add_entry(filename, content.c_str(), content.size());
+        for (const auto& log_file : log_files) {
+            // Read file content
+            std::ifstream file(log_file.source_path.string(), std::ios::binary);
+            if (!file.is_open()) {
+                BOOST_LOG_TRIVIAL(warning) << "Failed to open log file: " << log_file.source_path.string();
+                continue;
             }
+
+            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            file.close();
+
+            // Add to ZIP
+            zipper.add_entry(log_file.archive_name, content.c_str(), content.size());
         }
 
         zipper.finalize();
 
-        // 5. Show success message
+        // 4. Show success message
         MessageDialog success_dlg(this,
             _L("Logs exported successfully."),
             _L("Export Logs"),
@@ -4252,7 +4274,6 @@ void MainFrame::export_logs()
         error_dlg.ShowModal();
     }
 }
-
 
 void MainFrame::update_side_preset_ui()
 {
