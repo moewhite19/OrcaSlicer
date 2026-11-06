@@ -923,6 +923,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionFloat,               support_interface_spacing))
     ((ConfigOptionFloat,                support_interface_min_area))
     ((ConfigOptionFloats,               support_interface_speed))
+    ((ConfigOptionFloats,               support_interface_bottom_speed))
     ((ConfigOptionEnum<SupportMaterialPattern>, support_base_pattern))
     ((ConfigOptionEnum<SupportMaterialInterfacePattern>, support_interface_pattern))
     // Spacing between support material lines (the hatching distance).

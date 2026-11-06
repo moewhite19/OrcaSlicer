@@ -2004,6 +2004,8 @@ void generate_support_toolpaths(
             for (LayerCacheItem &layer_cache_item : layer_cache.nonempty) {
                 // Trim the extrusion height from the bottom by the overlapping layers.
                 modulate_extrusion_by_overlapping_layers(layer_cache_item.layer_extruded->extrusions, *layer_cache_item.layer_extruded->layer, layer_cache_item.overlapping);
+                if (layer_cache_item.layer_extruded->layer->layer_type == SupporLayerType::BottomContact)
+                    support_layer.has_bottom_contact = true;
                 support_layer.support_fills.append(std::move(layer_cache_item.layer_extruded->extrusions));
             }
 

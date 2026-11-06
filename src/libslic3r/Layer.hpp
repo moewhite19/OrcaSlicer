@@ -283,6 +283,10 @@ public:
     ExtrusionEntityCollection   support_fills;
     SupportInnerType            support_type = stInnerNormal;
 
+    // Set when this layer contains bottom contact (interface) extrusions, so the
+    // G-code generator can apply the separate bottom support interface speed.
+    bool                        has_bottom_contact = false;
+
     // for tree supports
     ExPolygons base_areas;
 

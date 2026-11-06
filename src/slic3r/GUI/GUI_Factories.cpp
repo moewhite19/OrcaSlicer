@@ -136,7 +136,7 @@ std::map<std::string, std::vector<SimpleSettingData>>  SettingsFactory::OBJECT_C
                     {"support_object_xy_distance", "",20}, {"bridge_no_support", "",21},{"max_bridge_length", "",22},{"support_critical_regions_only", "",23},{"support_remove_small_overhang","",27},
                     {"support_object_first_layer_gap","",28}
                             }},
-    { L("Speed"), {{"support_speed", "",12}, {"support_interface_speed", "",13}
+    { L("Speed"), {{"support_speed", "",12}, {"support_interface_speed", "",13}, {"support_interface_bottom_speed", "",14}
                     }}
 };
 

@@ -1768,6 +1768,7 @@ void TreeSupport::generate_toolpaths()
                         filler_interface->spacing = interface_flow.spacing();
                         fill_expolygons_generate_paths(ts_layer->support_fills.entities, polys,
                             filler_interface.get(), fill_params, erSupportMaterialInterface, interface_flow);
+                        ts_layer->has_bottom_contact = true;
                     } else if (area_group.type == SupportLayer::RoofType) {
                         // roof_areas
                         fill_params.density       = interface_density;

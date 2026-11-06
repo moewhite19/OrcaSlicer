@@ -15729,3 +15729,9 @@ msgstr "开启模型站"
 
 msgid "When enabled, online models will be displayed on the Home page."
 msgstr "开启后，将在主页显示在线模型"
+
+msgid "Support bottom interface"
+msgstr "支撑底部接触面"
+
+msgid "Speed of the bottom support contact/interface layers. Set to 0 to use the speed of the support interface."
+msgstr "打印底部支撑接触面/界面层时的速度。设为 0 时使用支撑面的速度。"

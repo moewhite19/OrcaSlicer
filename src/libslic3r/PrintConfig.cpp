@@ -5579,6 +5579,16 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats { 80. });
 
+    def = this->add("support_interface_bottom_speed", coFloats);
+    def->label = L("Support bottom interface");
+    def->category = L("Speed");
+    def->tooltip = L("Speed of the bottom support contact/interface layers. "
+                     "Set to 0 to use the speed of the support interface.");
+    def->sidetext = "mm/s";	// milimeters per second, don't need translation
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloats { 0. });
+
     def = this->add("support_base_pattern", coEnum);
     def->label = L("Base pattern");
     def->category = L("Support");
@@ -7492,6 +7502,7 @@ const std::vector<std::string>& process_flow_variant_options()
         "small_perimeter_threshold",
         "support_speed",
         "support_interface_speed",
+        "support_interface_bottom_speed",
         "initial_layer_speed",
         "initial_layer_infill_speed",
         "initial_layer_travel_speed",
