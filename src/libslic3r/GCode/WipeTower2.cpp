@@ -3505,24 +3505,23 @@ int WipeTower2::get_wall_filament_for_layer(const WipeTowerInfo& layer)
     if (layer.tool_changes.empty()) {
         return -1;
     }
-    // The wipe tower (rib) outer wall must not be printed with a support or a
-    // soluble-support filament, so skip those when picking the wall filament.
+    // If the wipe tower filament is explicitly selected by a feature filament
+    // setting, honour it even when it is a support or soluble-support material.
+    if (m_wall_filament > 0) {
+        return m_wall_filament - 1;
+    }
+    // Auto mode: the wipe tower body / (rib) outer wall must not be printed with a
+    // support or soluble-support filament, unless there is no other filament available.
     auto is_wall_filament_candidate = [this](size_t tool) {
         return tool < m_filpar.size() && !m_filpar[tool].is_soluble && !m_filpar[tool].is_support;
     };
-    if (m_wall_filament > 0 && is_wall_filament_candidate(size_t(m_wall_filament - 1))) {
-        return m_wall_filament - 1;
-    }
     for (const WipeTowerInfo::ToolChange& tool_change : layer.tool_changes)
         if (is_wall_filament_candidate(tool_change.new_tool))
             return int(tool_change.new_tool);
     for (const WipeTowerInfo::ToolChange& tool_change : layer.tool_changes)
         if (is_wall_filament_candidate(tool_change.old_tool))
             return int(tool_change.old_tool);
-    // All filaments on this layer are support / soluble-support: keep the legacy behaviour.
-    if (m_wall_filament > 0) {
-        return m_wall_filament - 1;
-    }
+    // Only support / soluble-support filaments are available: fall back to the legacy behaviour.
     return int(layer.tool_changes[0].new_tool);
 }
 
