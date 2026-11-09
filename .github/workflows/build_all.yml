@@ -1,6 +1,9 @@
 name: Build all
 
 on:
+  schedule:
+    - cron: '17 20 * * *' # everyday 4:17 (Beijing time, UTC+8)
+
   workflow_dispatch:
     inputs:
       build-deps-only:
